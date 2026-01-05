@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
+#include "highlighter.h"
 #include <QFile>
 #include <QFileDialog>
 #include <QTextStream>
@@ -15,6 +16,9 @@
 #include <QKeyEvent>
 #include <QCoreApplication>
 #include <QListWidget>
+#include <QProcess>
+#include <QColorDialog>
+#include <QPalette>
 
 MainWindow::MainWindow(QWidget *parent) // constructor
     : QMainWindow(parent), ui(new Ui::MainWindow)
@@ -24,7 +28,8 @@ MainWindow::MainWindow(QWidget *parent) // constructor
     this->setCentralWidget(ui->textEdit);
 
     QSettings settings("user", "1");
-    loadMacroLibrary();
+    macroManager = new MacroManager(ui->textEdit, this);
+    macroManager->loadMacroLibrary();
 
     // Kopiowanie
     QString copyKey = settings.value("shortcuts/copy", "Esc, Y").toString();
@@ -64,6 +69,22 @@ MainWindow::MainWindow(QWidget *parent) // constructor
     macroPlayShortcut = new QShortcut(QKeySequence(playKey), this);
     connect(macroPlayShortcut, &QShortcut::activated, this, &MainWindow::playMacro);
 
+    // Skrót Systemowy
+    QString sysCommandKey = settings.value("shortcuts/sysCommand", "Esc, !").toString();
+    systemCommandShortcut = new QShortcut(QKeySequence(sysCommandKey), this);
+    connect(systemCommandShortcut, &QShortcut::activated, this, &MainWindow::runSystemCommand);
+
+    // Inicjalizacja Highlightera
+    highlighter = new Highlighter(ui->textEdit->document());
+
+    // Kolory (Usunięto ponowną definicję settings)
+    QString bgName = settings.value("colors/bg", "#ffffff").toString();
+    QString textName = settings.value("colors/text", "#000000").toString();
+
+    QPalette p = ui->textEdit->palette();
+    p.setColor(QPalette::Base, QColor(bgName));
+    p.setColor(QPalette::Text, QColor(textName));
+    ui->textEdit->setPalette(p);
 }
 void MainWindow::onChangeShortcutClicked(){
     QDialog dialog(this);
@@ -71,21 +92,25 @@ void MainWindow::onChangeShortcutClicked(){
     QVBoxLayout *layout = new QVBoxLayout(&dialog);
 
     // Tworzymy pola edycji dla każdego skrótu
-    layout->addWidget(new QLabel("Copy (Esc+y):"));
+    layout->addWidget(new QLabel("Copy:"));
     QKeySequenceEdit *copyEdit = new QKeySequenceEdit(shortcut_copy->key(), &dialog);
     layout->addWidget(copyEdit);
 
-    layout->addWidget(new QLabel("Next Match (Esc+f):"));
+    layout->addWidget(new QLabel("Next Match:"));
     QKeySequenceEdit *nextEdit = new QKeySequenceEdit(enterShortcut->key(), &dialog);
     layout->addWidget(nextEdit);
 
-    layout->addWidget(new QLabel("Prev Match (Esc+Shift+f):"));
+    layout->addWidget(new QLabel("Prev Match:"));
     QKeySequenceEdit *prevEdit = new QKeySequenceEdit(shiftEnterShortcut->key(), &dialog);
     layout->addWidget(prevEdit);
 
-    layout->addWidget(new QLabel("Quit Search (Esc+q):"));
+    layout->addWidget(new QLabel("Quit Search:"));
     QKeySequenceEdit *quitEdit = new QKeySequenceEdit(quitSearchShortcut->key(), &dialog);
     layout->addWidget(quitEdit);
+
+    layout->addWidget(new QLabel("Run System Command:"));
+    QKeySequenceEdit *runSystemCommandEdit = new QKeySequenceEdit(systemCommandShortcut->key(), &dialog);
+    layout->addWidget(runSystemCommandEdit);
 
     QPushButton *btnSave = new QPushButton("Save All", &dialog);
     layout->addWidget(btnSave);
@@ -166,6 +191,8 @@ void MainWindow::on_actionNew_triggered()
 {
     file_path = "";
     ui->textEdit->setText("");
+    this->setWindowTitle("Untitled - EzVim");
+
 }
 
 
@@ -173,8 +200,9 @@ void MainWindow::on_actionOpen_triggered()
 {
 
     QString file_name = QFileDialog::getOpenFileName(this, "Open the file");
+    if (file_name.isEmpty()) return; // user cancelled
     QFile file(file_name);
-    file_path = file_name;
+
     if(!file.open(QFile::ReadOnly | QFile::Text)){
         QMessageBox::warning(this, " ", "file not open");
         return;
@@ -183,11 +211,18 @@ void MainWindow::on_actionOpen_triggered()
     QString text = in.readAll();
     ui->textEdit->setText(text);
     file.close();
+
+    this->setWindowTitle(file_name);
 }
 
 
 void MainWindow::on_actionSave_triggered()
 {
+    if (file_path.isEmpty()){
+        on_actionSave_as_triggered();
+        return;
+    }
+
     QFile file(file_path);
     if(!file.open(QFile::WriteOnly | QFile::Text)){
         QMessageBox::warning(this, " ", "file not open");
@@ -198,6 +233,8 @@ void MainWindow::on_actionSave_triggered()
     out << text;
     file.flush();
     file.close();
+
+    this->setWindowTitle(file_path);
 }
 
 
@@ -215,6 +252,8 @@ void MainWindow::on_actionSave_as_triggered()
     out << text;
     file.flush();
     file.close();
+
+    this->setWindowTitle(file_name);
 }
 
 
@@ -279,12 +318,6 @@ void MainWindow::on_actionSearch_triggered()
             QMessageBox::information(this, "Search", "No matches found.");
         }
     }
-
-    // bool found = ui->textEdit->find();
-    // if (!found) {
-    //     ui->textEdit->moveCursor(QTextCursor::Start);
-    //     found = ui->textEdit->find("targetWord");
-    // }
 }
 
 void MainWindow::updateSearchFocus(){
@@ -312,141 +345,7 @@ void MainWindow::findPrevMatch() {
     updateSearchFocus();
 }
 
-void MainWindow::on_actionSearch_Replace_triggered()
-{
 
-}
-
-bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
-    if (obj == ui->textEdit && event->type() == QEvent::KeyPress){
-        QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
-
-        qDebug() << "Key:" << keyEvent->key()
-                 << "Text:" << keyEvent->text()
-                 << "Mods:" << keyEvent->modifiers();
-
-        if (isRecording){
-            MacroEvent e; // initialize the struct
-            e.key = keyEvent->key();
-            e.modifiers = keyEvent->modifiers();
-            e.text = keyEvent->text();
-            macroBuffer.append(e);
-        }
-    }
-
-    return QMainWindow::eventFilter(obj, event);
-}
-
-void MainWindow::toggleMacroRecord() {
-    if (!isRecording) {
-        macroBuffer.clear();
-        isRecording = true;
-        ui->statusbar->showMessage("Recording Macro...");
-    } else {
-        isRecording = false;
-        ui->statusbar->showMessage("Recording Stopped", 2000);
-
-        bool ok;
-        QString name = QInputDialog::getText(this, "Save Macro", "Macro Name:", QLineEdit::Normal, "", &ok);
-
-        if (ok && !name.isEmpty()){
-            QDialog keyDialog(this);
-            keyDialog.setWindowTitle("Assign Playback Key");
-            QVBoxLayout *lay = new QVBoxLayout(&keyDialog);
-            lay->addWidget(new QLabel("Press the playback shortcut:"));
-            QKeySequenceEdit *keyEdit = new QKeySequenceEdit(&keyDialog);
-            lay->addWidget(keyEdit);
-            QPushButton *btn = new QPushButton("Save", &keyDialog);
-            lay->addWidget(btn);
-            connect(btn, &QPushButton::clicked, &keyDialog, &QDialog::accept);
-
-            if (keyDialog.exec() == QDialog::Accepted) {
-                QKeySequence ks = keyEdit->keySequence();
-
-                macroLibrary[name] = macroBuffer;
-
-                if (macroShortcuts.contains(name)) delete macroShortcuts[name];
-                QShortcut *s = new QShortcut(ks, this);
-                connect(s, &QShortcut::activated, this, [this, name](){ playNamedMacro(name); });
-                macroShortcuts[name] = s;
-
-                QSettings settings("user", "1");
-                QStringList names = settings.value("macros/library_names").toStringList();
-                if (!names.contains(name)) names.append(name);
-
-                settings.setValue("macros/library_names", names);
-                settings.setValue("macros/seq_" + name, macroToString());
-                settings.setValue("macros/key_" + name, ks.toString());
-            }
-        }
-    }
-}
-
-void MainWindow::playMacro(){
-    if (isRecording || macroBuffer.isEmpty()) return; // dont play when recording
-
-    ui->textEdit->removeEventFilter(this); // dont record the playback
-
-    for (const MacroEvent &e : std::as_const(macroBuffer)) {
-        simulateKey(e.key, e.modifiers, e.text);
-    }
-    ui->textEdit->installEventFilter(this);
-}
-
-void MainWindow::simulateKey(int key, Qt::KeyboardModifiers mods, const QString &text){
-    QKeyEvent press(QEvent::KeyPress,key, mods, text);
-    QCoreApplication::sendEvent(ui->textEdit->viewport(), &press);
-
-    QKeyEvent release(QEvent::KeyRelease, key, mods, text);
-    QCoreApplication::sendEvent(ui->textEdit->viewport(), &release);
-}
-
-
-
-// QDialog dialog(this);
-// dialog.setWindowTitle("Edit Macros");
-// QVBoxLayout *layout = new QVBoxLayout(&dialog);
-
-// layout->addWidget(new QLabel("Record macro (Esc+m)"));
-// QKeySequenceEdit *recEdit = new QKeySequenceEdit(macroRecordShortcut->key(), &dialog);
-// layout->addWidget(recEdit);
-
-// layout->addWidget(new QLabel("Play macro (Esc+p)"));
-// QKeySequenceEdit *playEdit = new QKeySequenceEdit(macroPlayShortcut->key(), &dialog);
-// layout->addWidget(playEdit);
-
-// layout->addWidget(new QLabel("MacroRecord (Esc+m)"));
-// QKeySequenceEdit *recEdit = new QKeySequenceEdit(macroRecordShortcut->key(), &dialog);
-// layout->addWidget(recEdit);
-
-// layout->addWidget(new QLabel("MacroRecord (Esc+p)"));
-// QKeySequenceEdit *playEdit = new QKeySequenceEdit(macroPlayShortcut->key(), &dialog);
-// layout->addWidget(playEdit);
-
-
-QString MainWindow::macroToString(){
-    QStringList parts;
-    for(const auto &e : std::as_const(macroBuffer)){
-        parts<<QString("%1|%2|%3").arg(e.key).arg((int)e.modifiers).arg(e.text);
-    }
-    return parts.join(";");
-}
-
-void MainWindow::loadMacroFromString(const QString &str) {
-    macroBuffer.clear();
-    if (str.isEmpty()) return;
-    QStringList items = str.split(";");
-    for (const QString &item : std::as_const(items)){
-        QStringList data = item.split("|");
-        if (data.size()>=3) {
-            MacroEvent e;
-            e.key = data[0].toInt();
-            e.modifiers = (Qt::KeyboardModifiers)data[1].toInt();
-            e.text = data[2];
-            macroBuffer.append(e);
-        }
-    }
-}
 void MainWindow::on_actionEditKeybinds_triggered()
 {
     onChangeShortcutClicked();
@@ -457,37 +356,30 @@ void MainWindow::on_actionEditMacros_triggered() {
     dialog.setWindowTitle("Manage Macro Library");
     QVBoxLayout *layout = new QVBoxLayout(&dialog);
 
-    layout->addWidget(new QLabel("<b>Saved Macros:</b>"));
-
     QListWidget *listWidget = new QListWidget(&dialog);
-    for (auto it = macroLibrary.begin(); it != macroLibrary.end(); ++it) {
-        QString keybind = macroShortcuts[it.key()]->key().toString();
+    // Access via macroManager pointer:
+    for (auto it = macroManager->macroLibrary.begin(); it != macroManager->macroLibrary.end(); ++it) {
+        QString keybind = macroManager->macroShortcuts[it.key()]->key().toString();
         listWidget->addItem(it.key() + " (" + keybind + ")");
     }
     layout->addWidget(listWidget);
 
-    QHBoxLayout *btnLayout = new QHBoxLayout();
     QPushButton *btnDelete = new QPushButton("Delete Selected", &dialog);
-    QPushButton *btnClose = new QPushButton("Close", &dialog);
-    btnLayout->addWidget(btnDelete);
-    btnLayout->addWidget(btnClose);
-    layout->addLayout(btnLayout);
-
-    connect(btnClose, &QPushButton::clicked, &dialog, &QDialog::accept);
+    layout->addWidget(btnDelete);
 
     connect(btnDelete, &QPushButton::clicked, this, [this, listWidget]() {
         QListWidgetItem *item = listWidget->currentItem();
         if (item) {
             QString name = item->text().split(" (").first();
-            auto reply = QMessageBox::question(this, "Confirm Delete",
-                                               "Are you sure you want to delete: " + name + "?",
+            auto reply = QMessageBox::question(this, "Confirm", "Delete macro: " + name + "?",
                                                QMessageBox::Yes | QMessageBox::No);
 
-            if (reply == QMessageBox::Yes){
-                macroLibrary.remove(name);
-                if (macroShortcuts.contains(name)) {
-                    delete macroShortcuts[name];
-                    macroShortcuts.remove(name);
+            if (reply == QMessageBox::Yes) {
+                // Delete from the manager's maps
+                macroManager->macroLibrary.remove(name);
+                if (macroManager->macroShortcuts.contains(name)) {
+                    delete macroManager->macroShortcuts[name];
+                    macroManager->macroShortcuts.remove(name);
                 }
 
                 QSettings settings("user", "1");
@@ -498,52 +390,72 @@ void MainWindow::on_actionEditMacros_triggered() {
                 settings.remove("macros/key_" + name);
 
                 delete item;
-                QMessageBox::information(this, "Deleted", "Macro removed.");
             }
-        } else {
-            QMessageBox::warning(this, "Selection", "Please select a macro to delete.");
         }
     });
-
     dialog.exec();
 }
-void MainWindow::loadMacroLibrary(){
+
+void MainWindow::on_actionEdit_Colorscheme_triggered()
+{
+    QColor bgColor = QColorDialog::getColor(Qt::white, this, "Wybierz kolor tła");
+    if (!bgColor.isValid()) return;
+
+    QColor textColor = QColorDialog::getColor(Qt::black, this, "Wybierz kolor tekstu");
+    QPalette p = ui->textEdit->palette();
+    p.setColor(QPalette::Base, bgColor);
+    p.setColor(QPalette::Text, textColor);
+    ui->textEdit->setPalette(p);
+
+    highlighter->setColors(Qt::blue, Qt::darkGreen);
+
     QSettings settings("user", "1");
-    QStringList names = settings.value("macros/library_names").toStringList();
+    settings.setValue("colors/bg", bgColor.name());
+    settings.setValue("colors/text", textColor.name());
+}
 
-    for (const QString &name: std::as_const(names)){
-        QString sequenceStr = settings.value("macros/seq_"+name).toString();
-        QString keyStr = settings.value("macros/key_"+name).toString();
+void MainWindow::runSystemCommand() {
+    bool ok;
+    QString command = QInputDialog::getText(this, "System Call", "!", QLineEdit::Normal, "", &ok);
 
-        QList<MacroEvent> buffer;
-        QStringList items= sequenceStr.split(";", Qt::SkipEmptyParts);
+    if (ok && !command.isEmpty()) {
+        QProcess process;
+#ifdef Q_OS_WIN
+        process.start("cmd", QStringList() << "/c" << command);
+#else
+        process.start("sh", QStringList() << "-c" << command);
+#endif
 
-        for (const QString &item : std::as_const(items)){
-            QStringList data= item.split("|");
-            if (data.size()>=3){
-                MacroEvent e;
-                e.key=data[0].toInt();
-                e.modifiers = (Qt::KeyboardModifiers)data[1].toInt();
-                e.text = data[2];
-                buffer.append(e);
-            }
+        if (process.waitForFinished(5000)) {
+            QString output = process.readAllStandardOutput();
+            if (!output.isEmpty()) QMessageBox::information(this, "Output", output);
+            else ui->statusbar->showMessage("Command executed.", 3000);
         }
-        macroLibrary[name]=buffer;
-        QShortcut *s = new QShortcut(QKeySequence(keyStr), this);
-        connect(s, &QShortcut::activated, this, [this, name](){ playNamedMacro(name); });
-        macroShortcuts[name] = s;
     }
 }
 
-void MainWindow::playNamedMacro(QString name){
-    if (isRecording) return;
-
-    QList<MacroEvent> buffer = macroLibrary[name];
-    ui->textEdit->removeEventFilter(this);
-
-    for (const auto &e: std::as_const(buffer)){
-        simulateKey(e.key, e.modifiers, e.text);
-    }
-    ui->textEdit->installEventFilter(this);
+void MainWindow::on_actionCommand_triggered()
+{
+    runSystemCommand();
 }
 
+// delegate
+void MainWindow::toggleMacroRecord() {
+    macroManager->toggleRecord();
+}
+
+// delegate
+void MainWindow::playMacro() {
+    macroManager->playMacro();
+}
+
+bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
+    if (obj == ui->textEdit && event->type() == QEvent::KeyPress){
+        QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
+
+        if (macroManager->isRecording()){
+            macroManager->recordEvent(keyEvent);
+        }
+    }
+    return QMainWindow::eventFilter(obj, event);
+}
