@@ -6,6 +6,7 @@
 #include <QShortcut>
 #include "highlighter.h"
 #include "macromanager.h"
+#include "file_io.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -47,6 +48,7 @@ private slots:
     void playMacro();         // Delegates to macroManager
 
 private:
+    FileIO *fileIO;
     Ui::MainWindow *ui;
     Highlighter *highlighter;
     MacroManager *macroManager; // Pointer to our helper class

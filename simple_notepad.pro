@@ -9,12 +9,14 @@ CONFIG += c++17
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += \
+    file_io.cpp \
     highlighter.cpp \
     macromanager.cpp \
     main.cpp \
     mainwindow.cpp
 
 HEADERS += \
+    file_io.h \
     highlighter.h \
     macromanager.h \
     mainwindow.h

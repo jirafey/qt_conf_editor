@@ -85,6 +85,8 @@ MainWindow::MainWindow(QWidget *parent) // constructor
     p.setColor(QPalette::Base, QColor(bgName));
     p.setColor(QPalette::Text, QColor(textName));
     ui->textEdit->setPalette(p);
+
+    fileIO = new FileIO(ui->textEdit, this);
 }
 void MainWindow::onChangeShortcutClicked(){
     QDialog dialog(this);
@@ -93,23 +95,28 @@ void MainWindow::onChangeShortcutClicked(){
 
     // Tworzymy pola edycji dla każdego skrótu
     layout->addWidget(new QLabel("Copy:"));
-    QKeySequenceEdit *copyEdit = new QKeySequenceEdit(shortcut_copy->key(), &dialog);
+    QKeySequenceEdit *copyEdit = new QKeySequenceEdit(&dialog);
+    copyEdit->setKeySequence(shortcut_copy->key());
     layout->addWidget(copyEdit);
 
     layout->addWidget(new QLabel("Next Match:"));
-    QKeySequenceEdit *nextEdit = new QKeySequenceEdit(enterShortcut->key(), &dialog);
+    QKeySequenceEdit *nextEdit = new QKeySequenceEdit(&dialog);
+    nextEdit->setKeySequence(enterShortcut->key());
     layout->addWidget(nextEdit);
 
     layout->addWidget(new QLabel("Prev Match:"));
-    QKeySequenceEdit *prevEdit = new QKeySequenceEdit(shiftEnterShortcut->key(), &dialog);
+    QKeySequenceEdit *prevEdit = new QKeySequenceEdit(&dialog);
+    prevEdit->setKeySequence(shiftEnterShortcut->key());
     layout->addWidget(prevEdit);
 
     layout->addWidget(new QLabel("Quit Search:"));
-    QKeySequenceEdit *quitEdit = new QKeySequenceEdit(quitSearchShortcut->key(), &dialog);
+    QKeySequenceEdit *quitEdit = new QKeySequenceEdit(&dialog);
+    quitEdit->setKeySequence(quitSearchShortcut->key());
     layout->addWidget(quitEdit);
 
     layout->addWidget(new QLabel("Run System Command:"));
-    QKeySequenceEdit *runSystemCommandEdit = new QKeySequenceEdit(systemCommandShortcut->key(), &dialog);
+    QKeySequenceEdit *runSystemCommandEdit = new QKeySequenceEdit(&dialog);
+    runSystemCommandEdit->setKeySequence(systemCommandShortcut->key());
     layout->addWidget(runSystemCommandEdit);
 
     QPushButton *btnSave = new QPushButton("Save All", &dialog);
@@ -189,71 +196,26 @@ void MainWindow::copy_and_select_line(){
 
 void MainWindow::on_actionNew_triggered()
 {
-    file_path = "";
-    ui->textEdit->setText("");
-    this->setWindowTitle("Untitled - EzVim");
-
+    fileIO->newFile();
 }
 
 
 void MainWindow::on_actionOpen_triggered()
 {
 
-    QString file_name = QFileDialog::getOpenFileName(this, "Open the file");
-    if (file_name.isEmpty()) return; // user cancelled
-    QFile file(file_name);
-
-    if(!file.open(QFile::ReadOnly | QFile::Text)){
-        QMessageBox::warning(this, " ", "file not open");
-        return;
-    }
-    QTextStream in(&file);
-    QString text = in.readAll();
-    ui->textEdit->setText(text);
-    file.close();
-
-    this->setWindowTitle(file_name);
+    fileIO->openFile();
 }
 
 
 void MainWindow::on_actionSave_triggered()
 {
-    if (file_path.isEmpty()){
-        on_actionSave_as_triggered();
-        return;
-    }
-
-    QFile file(file_path);
-    if(!file.open(QFile::WriteOnly | QFile::Text)){
-        QMessageBox::warning(this, " ", "file not open");
-        return;
-    }
-    QTextStream out(&file);
-    QString text = ui->textEdit->toPlainText();
-    out << text;
-    file.flush();
-    file.close();
-
-    this->setWindowTitle(file_path);
+    fileIO->saveFile();
 }
 
 
 void MainWindow::on_actionSave_as_triggered()
 {
-    QString file_name = QFileDialog::getSaveFileName(this, "Open the file");
-    QFile file(file_name);
-    file_path = file_name;
-    if(!file.open(QFile::WriteOnly | QFile::Text)){
-        QMessageBox::warning(this, " ", "file not open");
-        return;
-    }
-    QTextStream out(&file);
-    QString text = ui->textEdit->toPlainText();
-    out << text;
-    file.flush();
-    file.close();
-
-    this->setWindowTitle(file_name);
+    fileIO->saveFileAs();
 }
 
 
@@ -359,7 +321,11 @@ void MainWindow::on_actionEditMacros_triggered() {
     QListWidget *listWidget = new QListWidget(&dialog);
     // Access via macroManager pointer:
     for (auto it = macroManager->macroLibrary.begin(); it != macroManager->macroLibrary.end(); ++it) {
-        QString keybind = macroManager->macroShortcuts[it.key()]->key().toString();
+        QString name = it.key();
+        QString keybind = "No Key";
+        if (macroManager->macroShortcuts.contains(name) && macroManager->macroShortcuts[name]){
+            keybind = macroManager->macroShortcuts[name]->key().toString();
+        }
         listWidget->addItem(it.key() + " (" + keybind + ")");
     }
     layout->addWidget(listWidget);
