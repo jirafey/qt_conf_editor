@@ -1,43 +1,73 @@
 #include "highlighter.h"
 
-Highlighter::Highlighter(QTextDocument *parent) : QSyntaxHighlighter(parent){
-    keywordFormat.setFontWeight(QFont::Bold);
-    keywordFormat.setForeground(Qt::blue);
+Highlighter::Highlighter(QTextDocument *parent) : QSyntaxHighlighter(parent) {
+    m_keywordColor = QColor(249, 38, 114); // Pink
+    m_commentColor = QColor(117, 113, 94); // Grey-Olive
+    m_stringColor = QColor(230, 219, 116);  // Yellow
+    m_typeColor = QColor(102, 217, 239);    // Cyan
 
-    for (const QString &word : std::as_const(keywords)){
-        HighlightRule rule;
+    setupRules();
+}
+
+void Highlighter::setupRules() {
+    rules.clear();
+    HighlightRule rule;
+
+    QTextCharFormat keywordFormat;
+    keywordFormat.setForeground(m_keywordColor);
+    keywordFormat.setFontWeight(QFont::Bold);
+    for (const QString &word : keywords) {
         rule.pattern = QRegularExpression("\\b" + word + "\\b");
         rule.format = keywordFormat;
         rules.append(rule);
     }
 
+    // Types/Classes
+    QTextCharFormat typeFormat;
+    typeFormat.setForeground(m_typeColor);
+    typeFormat.setFontItalic(true);
+    rule.pattern = QRegularExpression("\\b[A-Z][A-Za-z0-9_]*\\b");
+    rule.format = typeFormat;
+    rules.append(rule);
+
+    QTextCharFormat functionFormat;
+    functionFormat.setForeground(QColor(166, 226, 46)); // Neon Green
+    rule.pattern = QRegularExpression("\\b[A-Za-z0-9_]+(?=\\s*\\()");
+    rule.format = functionFormat;
+    rules.append(rule);
+
+    QTextCharFormat numberFormat;
+    numberFormat.setForeground(QColor(174, 129, 255)); // Purple
+    rule.pattern = QRegularExpression("\\b\\d+\\b");
+    rule.format = numberFormat;
+    rules.append(rule);
+
+    QTextCharFormat stringFormat;
+    stringFormat.setForeground(m_stringColor);
+    rule.pattern = QRegularExpression("\".*?\"");
+    rule.format = stringFormat;
+    rules.append(rule);
+
+    QTextCharFormat commentFormat;
+    commentFormat.setForeground(m_commentColor);
     commentFormat.setFontItalic(true);
-    commentFormat.setForeground(Qt::darkGreen);
-
-    HighlightRule commentRule;
-    commentRule.pattern = QRegularExpression("//[^\n]*");
-    commentRule.format = commentFormat;
-    rules.append(commentRule);
+    rule.pattern = QRegularExpression("//[^\n]*");
+    rule.format = commentFormat;
+    rules.append(rule);
 }
 
-void Highlighter::setColors(QColor keywordColor, QColor commentColor) {
-    keywordFormat.setForeground(keywordColor);
-    commentFormat.setForeground(commentColor); // POPRAWIONO: wcześniej było keywordFormat
+void Highlighter::setColors(QColor keywordColor, QColor commentColor, QColor stringColor, QColor typeColor) {
+    m_keywordColor = keywordColor;
+    m_commentColor = commentColor;
+    m_stringColor = stringColor;
+    m_typeColor = typeColor;
 
-    for(int i=0; i<rules.size(); i++){
-        // Jeśli reguła zawiera slashe, przypisz format komentarza
-        if (rules[i].pattern.pattern().contains("//")){
-            rules[i].format = commentFormat;
-        }
-        else{
-            rules[i].format = keywordFormat;
-        }
-    }
-    rehighlight(); // Odśwież widok
+    setupRules();
+    rehighlight();
 }
 
-void Highlighter::highlightBlock(const QString &text){
-    for(const auto &rule : std::as_const(rules)){
+void Highlighter::highlightBlock(const QString &text) {
+    for (const auto &rule : std::as_const(rules)) {
         QRegularExpressionMatchIterator it = rule.pattern.globalMatch(text);
         while (it.hasNext()) {
             QRegularExpressionMatch match = it.next();

@@ -202,11 +202,10 @@ void MainWindow::on_actionNew_triggered()
 
 void MainWindow::on_actionOpen_triggered()
 {
-
-    fileIO->openFile();
+    fileIO->openFileLazy();
+    // fileIO->openFileBufferedNewDS();
+    // fileIO->openFile();
 }
-
-
 void MainWindow::on_actionSave_triggered()
 {
     fileIO->saveFile();
@@ -261,8 +260,6 @@ void MainWindow::on_actionSearch_triggered()
     QString input = QInputDialog::getText(this, tr("Search"),tr("Input the search query:"), QLineEdit::Normal, "", &string_ok);
 
     if (string_ok && !input.isEmpty()){
-        // ui->textEdit->moveCursor(QTextCursor::Start);
-        // ui->textEdit->find(input);
         currentSelections = highlightMatches(input);
 
         if (!currentSelections.isEmpty()){
@@ -319,7 +316,6 @@ void MainWindow::on_actionEditMacros_triggered() {
     QVBoxLayout *layout = new QVBoxLayout(&dialog);
 
     QListWidget *listWidget = new QListWidget(&dialog);
-    // Access via macroManager pointer:
     for (auto it = macroManager->macroLibrary.begin(); it != macroManager->macroLibrary.end(); ++it) {
         QString name = it.key();
         QString keybind = "No Key";
@@ -341,7 +337,6 @@ void MainWindow::on_actionEditMacros_triggered() {
                                                QMessageBox::Yes | QMessageBox::No);
 
             if (reply == QMessageBox::Yes) {
-                // Delete from the manager's maps
                 macroManager->macroLibrary.remove(name);
                 if (macroManager->macroShortcuts.contains(name)) {
                     delete macroManager->macroShortcuts[name];
@@ -364,22 +359,40 @@ void MainWindow::on_actionEditMacros_triggered() {
 
 void MainWindow::on_actionEdit_Colorscheme_triggered()
 {
-    QColor bgColor = QColorDialog::getColor(Qt::white, this, "Wybierz kolor tła");
+    QColor bgColor = QColorDialog::getColor(Qt::white, this, "Background Color");
     if (!bgColor.isValid()) return;
 
-    QColor textColor = QColorDialog::getColor(Qt::black, this, "Wybierz kolor tekstu");
+    QColor textColor = QColorDialog::getColor(Qt::black, this, "General Text Color");
+    if (!textColor.isValid()) return;
+
+    // Syntax Highlighting Colors
+    QColor keyColor = QColorDialog::getColor(QColor(249, 38, 114), this, "Keyword Color (e.g. if, return)");
+    if (!keyColor.isValid()) return;
+
+    QColor commentColor = QColorDialog::getColor(QColor(117, 113, 94), this, "Comment Color");
+    if (!commentColor.isValid()) return;
+
+    QColor stringColor = QColorDialog::getColor(QColor(230, 219, 116), this, "String Color");
+    if (!stringColor.isValid()) return;
+
+    QColor typeColor = QColorDialog::getColor(QColor(102, 217, 239), this, "Class/Type Color");
+    if (!typeColor.isValid()) return;
+
     QPalette p = ui->textEdit->palette();
     p.setColor(QPalette::Base, bgColor);
     p.setColor(QPalette::Text, textColor);
     ui->textEdit->setPalette(p);
 
-    highlighter->setColors(Qt::blue, Qt::darkGreen);
+    highlighter->setColors(keyColor, commentColor, stringColor, typeColor);
 
     QSettings settings("user", "1");
     settings.setValue("colors/bg", bgColor.name());
     settings.setValue("colors/text", textColor.name());
+    settings.setValue("colors/keyword", keyColor.name());
+    settings.setValue("colors/comment", commentColor.name());
+    settings.setValue("colors/string", stringColor.name());
+    settings.setValue("colors/type", typeColor.name());
 }
-
 void MainWindow::runSystemCommand() {
     bool ok;
     QString command = QInputDialog::getText(this, "System Call", "!", QLineEdit::Normal, "", &ok);

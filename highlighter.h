@@ -1,4 +1,3 @@
-
 #ifndef HIGHLIGHTER_H
 #define HIGHLIGHTER_H
 
@@ -11,7 +10,11 @@ class Highlighter : public QSyntaxHighlighter {
     Q_OBJECT
 public:
     explicit Highlighter(QTextDocument *parent = nullptr);
-    void setColors(QColor keywordColor, QColor commentColor);
+
+    // Updated to handle all colors
+    void setColors(QColor keywordColor, QColor commentColor,
+                   QColor stringColor = QColor(230, 219, 116),
+                   QColor typeColor = QColor(102, 217, 239));
 
 protected:
     void highlightBlock(const QString &text) override;
@@ -22,8 +25,15 @@ private:
         QTextCharFormat format;
     };
     QVector<HighlightRule> rules;
-    QTextCharFormat keywordFormat;
-    QTextCharFormat commentFormat;
+
+    // Store the current colors
+    QColor m_keywordColor;
+    QColor m_commentColor;
+    QColor m_stringColor;
+    QColor m_typeColor;
+
+    void setupRules(); // New method to build the rules list
+
     QStringList keywords = {
 #include "keywords.inc"
     };
